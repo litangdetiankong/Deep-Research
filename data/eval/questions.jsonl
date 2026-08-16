@@ -1,0 +1,3 @@
+{"id": "q1", "question": "MCP 和 Function Calling 有什么区别？各自适合什么场景？", "must_have_any": ["MCP", "Function Calling"], "min_evidence": 3}
+{"id": "q2", "question": "ReAct 与 Plan-and-Solve 在开放研究任务上如何选择？", "must_have_any": ["ReAct", "Plan"], "min_evidence": 3}
+{"id": "q3", "question": "为什么 Deep Research 需要 Critic？只靠 Writer 自检不够吗？", "must_have_any": ["Critic", "引用"], "min_evidence": 2}
