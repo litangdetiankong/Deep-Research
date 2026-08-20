@@ -9,7 +9,7 @@ if str(SRC) not in sys.path:
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,11 @@ from deep_research.agents.writer import save_report
 from datetime import datetime, timezone
 from deep_research.history_store import append_history
 from deep_research.history_store import list_history, get_history
+from deep_research.schemas import ResearchState
+
+import json
+import queue
+import threading
 
 class ResearchRequest(BaseModel):
     question:str=Field(...,min_length=1,description="研究问题")
@@ -50,6 +55,20 @@ def health():
     return {"status": "ok"}
 
 
+def _payload_from_state(state: ResearchState, evidence_path: Path, report_path: Path) -> dict:
+    return {
+        "research_id": state.research_id,
+        "question": state.question,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "evidence_count": len(state.evidence),
+        "retry_count": state.metrics.retry_count,
+        "report_path": str(report_path),
+        "evidence_path": str(evidence_path),
+        "report_md": state.report_md or "",
+        "plan_sub_questions": list(state.plan.sub_questions) if state.plan else [],
+    }
+
+
 @app.post("/research", response_model=ResearchResponse)
 def research(req: ResearchRequest):
     q = req.question.strip()
@@ -62,25 +81,13 @@ def research(req: ResearchRequest):
 
         evidence_path = save_evidence_pack(state)
         report_path = save_report(state)
-
-        append_history(
-            {
-                "research_id": state.research_id,
-                "question": state.question,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "evidence_count": len(state.evidence),
-                "retry_count": state.metrics.retry_count,
-                "report_path": str(report_path),
-                "evidence_path": str(evidence_path),
-                "report_md": state.report_md or "",
-                "plan_sub_questions": list(state.plan.sub_questions) if state.plan else [],
-            }
-        )
+        payload = _payload_from_state(state, evidence_path, report_path)
+        append_history(payload)
 
         return ResearchResponse(
             research_id=state.research_id,
             question=state.question,
-            plan_sub_questions=list(state.plan.sub_questions) if state.plan else [],
+            plan_sub_questions=payload["plan_sub_questions"],
             evidence_count=len(state.evidence),
             retry_count=state.metrics.retry_count,
             report_md=state.report_md or "",
@@ -89,6 +96,47 @@ def research(req: ResearchRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/research/stream")
+def research_stream(req: ResearchRequest):
+    q = req.question.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="question 不能为空")
+
+    events: queue.Queue = queue.Queue()
+
+    def on_progress(stage: str, message: str) -> None:
+        events.put({"stage": stage, "message": message})
+
+    def worker() -> None:
+        try:
+            state = run_plan_and_search(q, on_progress=on_progress)
+            state = apply_critic_loop(state, max_rounds=req.max_rounds, on_progress=on_progress)
+            evidence_path = save_evidence_pack(state)
+            report_path = save_report(state)
+            payload = _payload_from_state(state, evidence_path, report_path)
+            append_history(payload)
+            events.put({"stage": "done", "message": "完成", "result": payload})
+        except Exception as e:
+            events.put({"stage": "error", "message": str(e)})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def gen():
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 ROOT = Path(__file__).resolve().parents[3]
 WEB_DIR = ROOT / "web"

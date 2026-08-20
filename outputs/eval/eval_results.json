@@ -2,10 +2,10 @@
   {
     "id": "q1",
     "question": "MCP 和 Function Calling 有什么区别？各自适合什么场景？",
-    "latency_s": 113.36,
-    "evidence_count": 16,
+    "latency_s": 50.07,
+    "evidence_count": 14,
     "min_evidence_ok": true,
-    "citation_count": 24,
+    "citation_count": 38,
     "unknown_citation_count": 0,
     "unknown_citations": [],
     "missing_headers": [],
@@ -14,17 +14,17 @@
       "Function Calling"
     ],
     "keyword_ok": true,
-    "critic_passed": false,
+    "critic_passed": true,
     "retry_count": 0,
-    "research_id": "2234eff8-c178-42b5-8796-db6abd4b43f0"
+    "research_id": "d1ec9e80-e767-4802-b7da-57800db8d83c"
   },
   {
     "id": "q2",
     "question": "ReAct 与 Plan-and-Solve 在开放研究任务上如何选择？",
-    "latency_s": 166.08,
-    "evidence_count": 19,
+    "latency_s": 68.49,
+    "evidence_count": 17,
     "min_evidence_ok": true,
-    "citation_count": 34,
+    "citation_count": 53,
     "unknown_citation_count": 0,
     "unknown_citations": [],
     "missing_headers": [],
@@ -33,17 +33,17 @@
       "Plan"
     ],
     "keyword_ok": true,
-    "critic_passed": false,
+    "critic_passed": true,
     "retry_count": 0,
-    "research_id": "a72970ca-4e86-4a4d-b166-1649247927e8"
+    "research_id": "458576ad-384a-4409-ba2b-942f0c4f5d99"
   },
   {
     "id": "q3",
     "question": "为什么 Deep Research 需要 Critic？只靠 Writer 自检不够吗？",
-    "latency_s": 204.92,
+    "latency_s": 84.4,
     "evidence_count": 19,
     "min_evidence_ok": true,
-    "citation_count": 41,
+    "citation_count": 46,
     "unknown_citation_count": 0,
     "unknown_citations": [],
     "missing_headers": [],
@@ -52,8 +52,8 @@
       "引用"
     ],
     "keyword_ok": true,
-    "critic_passed": false,
+    "critic_passed": true,
     "retry_count": 0,
-    "research_id": "66af146d-7b03-4184-a8dd-360b00d2a9c1"
+    "research_id": "f080dac3-a885-4edf-8dea-4673377ba2ca"
   }
 ]

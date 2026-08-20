@@ -5,3 +5,4 @@ tavily-python
 fastapi
 uvicorn
 openai
+mcp

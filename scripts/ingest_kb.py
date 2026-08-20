@@ -28,7 +28,7 @@ def read_raw_files()->list[dict]:
         source=f"file://{path.as_posix()}"
         m=re.search(r"^source:\s*(.+)$",text,flags=re.MULTILINE)
         if m:
-            suorce=m.group(1).strip()
+            source=m.group(1).strip()
 
         docs.append(
             {

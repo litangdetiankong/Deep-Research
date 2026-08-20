@@ -2,8 +2,8 @@
 
 > 项目路径：`D:\Deep-Research`  
 > 垂直领域：技术知识研报（Technical Research）  
-> 文档阶段：M0 立项骨架（架构已定义，Agent 尚未实现）  
-> 版本：v0.1｜2026-08-15
+> 文档阶段：主链路 / Web 进度 / 评测 / fetch_url / MCP 层次 A+B（开关）已落地  
+> 版本：v0.3｜2026-08-20（操作说明以 README 为准）
 
 ---
 
@@ -28,7 +28,7 @@
 
 - 不做金融荐股、医疗诊断、隐私数据抓取
 - 不把 Agentic RL / 模型训练当主线
-- M0～M2 不做复杂 Web 产品化与多租户
+- 不做复杂 Web 产品化与多租户（当前仅单机 FastAPI Demo）
 - 不追求一次性堆叠大量 Agent 角色
 
 ---
@@ -63,8 +63,17 @@
 │  Writer     │  按模板写作，结论绑定 evidence_id
 └──────┬──────┘
        ▼
-研究报告 (Markdown) + 轨迹日志 (JSONL) + 指标 (metrics)
+研究报告 (Markdown) + 证据包 JSON + 历史记录 + 指标 (metrics)
 ```
+
+**实现备注（与立项图的差异）：**
+
+- 实际编排在 `pipeline_m1.py`：Planner → Searcher → **Writer → Critic**（失败则补检重写）。立项图把 Critic 画在 Writer 之前，代码是先写再审。
+- `fetch_url` **已实现**（`tools/fetch.py`）：对已有网页证据按 score 取 Top-2，原地加长 `snippet`；超时/非 HTML 返回空字符串，不中断研究。
+- 网页 Demo 通过 `POST /research/stream` 推送阶段（规划 / 检索 / 深读 / 写作 / 检查）；评测仍用同步 `POST /research`。
+- `graph.py`（LangGraph）、独立 traces、Librarian **尚未实现**。
+- Searcher 是确定性流水线工具调用，不是模型每步自选工具的完整 ReAct。
+- Critic 当前是规则闸门（章节 / 引用闭合 / 摘要引用密度），不是再调一次大模型。
 
 ### 3.2 可选扩展角色（未实现）
 
@@ -191,13 +200,14 @@
 
 | 工具 | 作用 |
 |------|------|
-| `web_search` | 关键词检索，返回候选 URL/摘要 |
-| `fetch_url` | 抓取页面并抽取正文 |
-| `vector_search` | 检索本地技术知识库（RAG） |
+| `web_search` | 关键词检索，返回候选 URL/摘要（已实现，Tavily） |
+| `fetch_url` | 抓取页面并抽取正文（已实现；默认只深读 Top-2 网页） |
+| `vector_search` | 检索本地技术知识库（已实现，Chroma） |
 
-### 8.2 完整版（MCP 化）
+### 8.2 MCP 化
 
-将检索、读页、RAG 封装为 MCP Server，由 Agent Runtime 经 MCP Client 调用，便于演示「协议化工具接入」。
+- **层次 A（已实现）：** `rag_search` / `tavily_search` / `fetch_url` 封装为 MCP Server（`src/deep_research/mcp/kb_server.py`），Client 可 stdio 自测（`scripts/test_mcp_client.py`）。
+- **层次 B（已实现，默认关闭）：** `.env` 中 `USE_MCP=1` 时，`run_plan_and_search` 经 `tools/mcp_bridge.py` 一次拉起 stdio Client，完成本地检索、联网搜索与深读。`USE_MCP=0` 时主路径仍直接 `import` Python 函数。Critic 补检始终走本地 `vector_search`。
 
 ---
 
@@ -220,18 +230,20 @@ D:\Deep-Research\
 ├── src/deep_research/
 │   ├── config.py            # 配置与环境变量
 │   ├── schemas.py           # 数据结构契约
-│   ├── graph.py             # 编排（后续）
+│   ├── graph.py             # 编排（未实现）
 │   ├── agents/              # Planner/Searcher/Critic/Writer
-│   ├── tools/               # search/fetch/rag
-│   ├── memory/              # 工作记忆与存储
-│   ├── mcp/                 # MCP（后期）
-│   ├── eval/                # 评测（后期）
-│   └── api/                 # Web API（后期）
-├── data/                    # 原始文档与评测集
+│   ├── tools/               # rag.py、search.py、fetch.py、mcp_bridge.py
+│   ├── memory/              # 工作记忆（未实现）
+│   ├── mcp/kb_server.py     # MCP 层次 A
+│   ├── eval/runner.py       # 评测脚本
+│   └── api/main.py          # FastAPI（含 /research 与 /research/stream）
+├── data/raw                 # 本地语料
+├── data/eval/questions.jsonl
 ├── knowledge_base/          # 向量库落盘
 └── outputs/
-    ├── reports/             # 研究报告
-    └── traces/              # JSONL 轨迹
+    ├── reports/             # 研究报告 + 证据包
+    ├── history/             # 网页历史 JSONL
+    └── eval/                # 评测结果
 ```
 
 ---
@@ -242,10 +254,10 @@ D:\Deep-Research\
 |------|------|------|
 | 语言 | Python 3.10+ | 与主流 Agent 生态一致 |
 | 配置 | `.env` + `.env.example` | 密钥不进 Git |
-| 编排 | 先顺序闭环，后状态图/LangGraph | 先正确，再框架化 |
-| LLM | OpenAI 兼容 API | 通过环境变量配置 |
-| 向量库 | 后期 Chroma 等本地方案 | MVP 可先工具检索 |
-| 日志 | JSONL traces | 保证可回放 |
+| 编排 | 顺序脚本 `pipeline_m1.py` | LangGraph / `graph.py` 未上 |
+| LLM | DeepSeek（OpenAI 兼容） | `.env` 中 `LLM_*` |
+| 向量库 | 本地 Chroma（`tech_research`） | `scripts/ingest_kb.py` |
+| 日志 | 证据包 JSON + `history.jsonl` | 独立 traces 未做 |
 
 ---
 
@@ -253,19 +265,19 @@ D:\Deep-Research\
 
 | 里程碑 | 标志 | 状态 |
 |--------|------|------|
-| M0 立项 | 仓库目录 + 架构骨架 | **进行中 / 架构已定** |
-| M1 证据闭环 | CLI 产出证据包 JSON | 未开始 |
-| M2 报告闭环 | 带引用 Markdown 报告 | 未开始 |
-| A MVP | 可演示、可写简历 | 未开始 |
-| M3 MCP + 编排 | 协议化工具 + 状态图 | 未开始 |
-| M4 评测 | 指标与评测集 | 未开始 |
-| B 完整作品 | Web + 评测 + 面试稿 | 未开始 |
+| M0 立项 | 仓库目录 + 架构骨架 | **已完成** |
+| M1 证据闭环 | CLI 产出证据包 JSON | **已完成** |
+| M2 报告闭环 | 带引用 Markdown 报告 | **已完成** |
+| A MVP | 可演示、可写简历 | **已完成**（网页 + samples） |
+| M3 MCP + 编排 | 协议化工具 + 状态图 | **部分完成**：层次 A + 层次 B 开关已有；LangGraph 未做 |
+| M4 评测 | 指标与评测集 | **已完成**（3 题；2026-08-20 通过率 100%） |
+| B 完整作品 | Web + 评测 + 面试稿 | **基本完成**（含步骤进度与深读）；缺演示视频与 GitHub 推送 |
 
 ---
 
 ## 13. 演示问题方向（领域锚定）
 
-后续 Demo / 评测题围绕技术知识研报，例如：
+Demo / 评测题已固定为技术知识研报（见 `docs/demo_questions.md`、`data/eval/questions.jsonl`），例如：
 
 1. ReAct 与 Plan-and-Solve 在开放研究任务上的适用边界  
 2. MCP 与普通 Function Calling 的差异与适用场景  
@@ -280,3 +292,5 @@ D:\Deep-Research\
 | 日期 | 变更 |
 |------|------|
 | 2026-08-15 | 初始化架构文档（M0） |
+| 2026-08-20 | 按实现更新里程碑、目录与工具状态；标明实际流水线为 Writer 后 Critic；评测脚本位于 `src/deep_research/eval/runner.py` |
+| 2026-08-20 | v0.3：`fetch_url` Top-2 深读；`/research/stream` 步骤进度；MCP 层次 B（`USE_MCP` 开关） |

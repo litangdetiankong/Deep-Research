@@ -50,6 +50,13 @@ async def main() -> None:
             print("\ntavily_search result:")
             print(web)
 
+            page = await session.call_tool(
+                "fetch_url",
+                arguments={"url": "https://modelcontextprotocol.io/introduction", "max_chars": 400},
+            )
+            print("\nfetch_url result:")
+            print(page)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

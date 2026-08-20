@@ -36,12 +36,12 @@ def _format_evidence(evidence:list[Evidence],max_items:int=8)->str:
     lines=[]
     for e in evidence[:max_items]:
         snippet=(e.snippet or "").replace("\n","")
-        if len(snippet)>300:
-            snippet=snippet[:300]+"..."
+        if len(snippet)>800:
+            snippet=snippet[:800]+"..."
         lines.append(
             f"- id:{e.id}\n"
             f"  title:{e.title}\n"
-            f"  source:{e.score:.4f}\n"
+            f"  source:{e.source}\n"
             f"  snippet:{snippet}\n"
         )
     return "\n".join(lines) if lines else "(无证据)"
@@ -89,4 +89,5 @@ def save_report(state:ResearchState)->Path:
     return path
 
 def find_citations(report_md:str)->list[str]:
-    return re.findall(r"\[([^\[\]]+)\]",report_md)
+    raw=re.findall(r"\[([^\[\]]+)\]",report_md)
+    return [c for c in raw if "::" in c]

@@ -10,6 +10,7 @@ if str(SRC) not in sys.path:
 from mcp.server.mcpserver import MCPServer
 from deep_research.tools.rag import vector_search
 from deep_research.tools.search import web_search
+from deep_research.tools.fetch import fetch_url as _fetch_url
 
 mcp = MCPServer("deep-research-tools")
 
@@ -26,6 +27,12 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
     """Search the web via Tavily and return Evidence dicts."""
     hits = web_search(query, max_results=max_results)
     return [h.model_dump() for h in hits]
+
+
+@mcp.tool()
+def fetch_url(url: str, max_chars: int = 2000) -> str:
+    """Fetch a web page and return extracted plain text."""
+    return _fetch_url(url, max_chars=max_chars)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 面向**技术知识研报**的多智能体深度研究系统（Deep Research Agent）。
 
-输入一个调研问题，系统自动完成：**规划 → 检索取证（本地 RAG + 联网搜索）→ 带引用写作 → Critic 质量闸门**，并输出可追溯的 Markdown 研究报告。提供 CLI、FastAPI 网页（含历史记录与 Markdown 渲染），以及评测脚本与 MCP 工具封装（层次 A）。
+输入一个调研问题，系统自动完成：**规划 → 检索取证（本地 RAG + 联网搜索 + 高分网页深读）→ 带引用写作 → Critic 质量闸门**，并输出可追溯的 Markdown 研究报告。提供 CLI、FastAPI 网页（历史、Markdown 渲染、步骤进度），以及评测脚本与 MCP 工具封装（层次 A 自测，层次 B 可开关接入主检索）。
 
 > 垂直领域：Technical Research（Agent / RAG / MCP / 框架对比等）
 
@@ -11,13 +11,14 @@
 ## 功能特性
 
 - **Planner**：DeepSeek 生成结构化研究计划（子问题 / 成功标准 / 步数预算）
-- **Searcher**：本地 Chroma RAG + Tavily 联网搜索，统一为 `Evidence`
+- **Searcher**：本地 Chroma RAG + Tavily 联网搜索，对最高分 2 个网页 `fetch_url` 深读正文
 - **Writer**：固定报告模板 + 模型写作，关键结论带 `[evidence_id]` 引用
 - **Critic**：规则检查（结构 / 假引用 / 摘要引用密度）；失败则补检并有限次重写
-- **Web**：FastAPI + 左侧历史 / 右侧报告；报告支持 Markdown 渲染
-- **Eval**：固定题集一键评测（`data/eval/`）
-- **MCP（层次 A）**：将检索工具封装为 MCP Server，可用 Client 脚本自测
+- **Web**：FastAPI + 左侧历史 / 右侧报告；Markdown 渲染；`POST /research/stream` 显示当前步骤
+- **Eval**：固定题集一键评测（题集 `data/eval/`，脚本 `src/deep_research/eval/runner.py`）
+- **MCP**：层次 A 为 Server/Client 自测；层次 B 可通过 `.env` 中 `USE_MCP=1` 让主检索经 MCP Client 调用
 - **可落盘**：`outputs/reports/` 保存证据包 JSON 与报告 Markdown
+- **进度**：网页走 `POST /research/stream`，状态栏显示当前步骤
 
 ---
 
@@ -30,8 +31,8 @@
 Planner (DeepSeek) ──► Plan(JSON)
    │
    ▼
-Searcher ──► vector_search + Tavily web_search ──► Evidence[]
-   │            （可选经 MCP Server 暴露同名能力）
+Searcher ──► vector_search + Tavily + fetch_url（Top-2）──► Evidence[]
+   │            （USE_MCP=1 时经 MCP Client 调用同名工具）
    ▼
 Writer ──► 带引用 Markdown 报告
    │
@@ -90,6 +91,7 @@ SEARCH_API_KEY=你的Tavily密钥
 SEARCH_PROVIDER=tavily
 MAX_RESEARCH_STEPS=12
 MAX_CRITIC_ROUNDS=2
+USE_MCP=0
 ```
 
 **不要提交 `.env`。**
@@ -106,8 +108,10 @@ python scripts\ingest_kb.py
 uvicorn deep_research.api.main:app --app-dir src --reload --host 127.0.0.1 --port 8000
 ```
 
-- 页面：http://127.0.0.1:8000/
+- 页面：http://127.0.0.1:8000/（强制刷新后，状态栏会显示「规划 / 检索 / 深读 / 写作 / 检查」）
 - API 文档：http://127.0.0.1:8000/docs
+- 同步接口：`POST /research`（评测仍走这条）
+- 进度接口：`POST /research/stream`（网页使用）
 
 ### 5) 命令行
 
@@ -145,38 +149,38 @@ python src\deep_research\pipeline_m1.py
 ## 评测（Eval）
 
 题集：`data/eval/questions.jsonl`  
-脚本：`data/eval/runner.py`
+脚本：`src/deep_research/eval/runner.py`
 
 ```powershell
-python data\eval\runner.py
+python src\deep_research\eval\runner.py
 ```
 
-> 注意：`runner.py` 位于 `data/eval/` 时，项目根目录请用 `Path(__file__).resolve().parents[2]`（不要用 `parents[3]`）。
+脚本位于 `src/deep_research/eval/`：`parents[2]` 是 `src`（用于 import），`parents[3]` 是项目根（用于读题集、写 `outputs/eval`）。不要再按 `data/eval/runner.py` 的路径去改 `parents`。
 
-输出（典型）：
+输出：
 
 - `outputs/eval/eval_results.json`
 - `outputs/eval/eval_report.md`
 
-可将汇总指标填入 `docs/portfolio.md` 量化表。
+最新一轮（2026-08-20 重跑，含 `fetch_url` 深读）：`critic_pass_rate=100%`，`unknown_id_citation_rate=0%`，`avg_latency_s=67.65`。汇总见 [`docs/portfolio.md`](./docs/portfolio.md)。
 
 ---
 
-## MCP（层次 A）
+## MCP（层次 A / B）
 
-将本地 RAG / Tavily 检索封装为 MCP 工具，便于协议化演示。当前 SDK 为 **mcp 2.0**，使用 `MCPServer`（不是旧文档里的 `FastMCP`）。
+将本地 RAG / Tavily / `fetch_url` 封装为 MCP 工具。SDK 为 **mcp 2.0**，使用 `MCPServer`（不是旧文档里的 `FastMCP`）。
 
 - Server：`src/deep_research/mcp/kb_server.py`
-- Tools：`rag_search`、`tavily_search`
+- Tools：`rag_search`、`tavily_search`、`fetch_url`
 - Client 自测：`scripts/test_mcp_client.py`
+- 层次 B 桥接：`src/deep_research/tools/mcp_bridge.py`
 
 ```powershell
 python scripts\test_mcp_client.py
 ```
 
-成功时应能 `list_tools` 并调用工具返回 Evidence 列表。
-
-说明：主研究流水线仍可直接调用 Python 工具函数；MCP 用于互操作与作品集叙事。接入 Searcher 主路径属于层次 B（可选）。
+`.env` 中 `USE_MCP=0`（默认）：主链路直接调用 Python 函数，演示更稳。  
+`USE_MCP=1` 时 `run_plan_and_search` 经 MCP Client 做检索与深读（改完需重启 uvicorn）。Critic 补检仍走本地 `vector_search`。
 
 ---
 
@@ -190,7 +194,7 @@ Deep-Research/
 ├── requirements.txt
 ├── data/
 │   ├── raw/                 # 本地语料
-│   └── eval/                # 评测题集与 runner
+│   └── eval/                # 评测题集 questions.jsonl
 ├── docs/
 │   ├── demo_questions.md
 │   ├── portfolio.md
@@ -207,8 +211,12 @@ Deep-Research/
 └── src/deep_research/
     ├── api/main.py
     ├── agents/
-    ├── tools/
+    ├── tools/rag.py
+    ├── tools/search.py
+    ├── tools/fetch.py
+    ├── tools/mcp_bridge.py
     ├── mcp/kb_server.py
+    ├── eval/runner.py
     ├── schemas.py
     ├── config.py
     ├── llm.py
@@ -227,23 +235,24 @@ Deep-Research/
 - Planner / Writer / Critic 闭环
 - FastAPI 网页、历史记录、报告 Markdown 渲染
 - Demo 题与 `docs/samples` 精选报告
-- 评测脚本（`data/eval`）
-- MCP 层次 A（Server + Client 自测；需使用 mcp 2.0 的 `MCPServer`）
+- 评测脚本（`src/deep_research/eval/runner.py` + `data/eval/questions.jsonl`）；2026-08-20 三题 Critic 通过率 100%
+- MCP 层次 A（Server + Client 自测，含 `fetch_url` 工具）
+- MCP 层次 B（`USE_MCP=1` 时主检索经 Client；默认 `0` 直调函数。Critic 补检仍走本地 RAG）
+- `fetch_url` 深读分数最高的 2 个网页，失败不中断主流程
+- 网页步骤进度（`/research/stream`）
 
 ### 可继续增强
 
-- 评测指标写入作品集并扩大题集
-- MCP 层次 B：Searcher 主路径改为经 MCP Client 调用
+- 扩大评测题集，补 token / 费用
 - LangGraph 状态图编排
-- `fetch_url` 深读网页正文
-- 流式进度 / 更强可观测性
-- 演示视频
+- 演示视频与 GitHub 推送
+- token / 耗时写入 `Metrics`；Critic 补检也可走 MCP
 
 ---
 
 ## 求职一句话
 
-> 独立实现 Deep Research Agent：基于结构化状态契约，完成本地 RAG + 联网检索、多智能体规划写作与 Critic 自动补检；提供 FastAPI 网页演示、历史回看、固定 Demo 样例、评测脚本，以及 MCP 工具协议封装（层次 A）。
+> 独立实现 Deep Research Agent：基于结构化状态契约，完成本地 RAG + 联网检索与高分网页深读、多智能体规划写作与 Critic 自动补检；提供 FastAPI 网页（历史回看、步骤进度）、固定 Demo 与评测脚本（3 题 Critic 通过率 100%，未知 evidence_id 率 0%）；检索工具封装为 MCP Server，主链路可用 `USE_MCP` 切换是否经 Client 调用。
 
 ---
 

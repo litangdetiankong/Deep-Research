@@ -23,7 +23,7 @@ def web_search(query:str,max_results:int=5)->list[Evidence]:
     for i,item in enumerate(results):
         url=item.get("url","") or ""
         title=item.get("title","") or ""
-        snippet=item.get("snippet","") or ""
+        snippet=item.get("content") or item.get("snippet") or ""
         score=float(item.get("score",0.0) or 0.0)
 
         evidence_list.append(

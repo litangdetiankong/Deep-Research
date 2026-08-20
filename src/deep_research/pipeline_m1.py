@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import uuid
 from pathlib import Path
+from typing import Callable
 
 SRC=Path(__file__).resolve().parents[1]
 if str(SRC) not in sys.path:
@@ -15,10 +16,52 @@ from deep_research.tools.rag import vector_search
 from deep_research.agents.writer import run_writer, save_report, find_citations
 from deep_research.agents.critic import apply_critic_loop, run_critic
 from deep_research.tools.search import web_search
+from deep_research.tools.fetch import fetch_url
+from deep_research.config import USE_MCP
 
-def run_plan_and_search(question: str) -> ResearchState:
+ProgressFn = Callable[[str, str], None] | None
+
+
+def _emit(on_progress: ProgressFn, stage: str, message: str) -> None:
+    print(f"[progress] {stage}: {message}")
+    if on_progress:
+        on_progress(stage, message)
+
+
+def _upgrade_top_web(state: ResearchState) -> int:
+    web_items = [e for e in state.evidence if (e.source or "").startswith("http")]
+    web_items.sort(key=lambda e: e.score, reverse=True)
+    fetched = 0
+    for e in web_items[:2]:
+        body = fetch_url(e.source)
+        if not body:
+            continue
+        e.snippet = body
+        fetched += 1
+        state.metrics.tool_calls += 1
+    print(f"[fetch_url] upgraded={fetched}")
+    return fetched
+
+
+def run_plan_and_search(question: str, on_progress: ProgressFn = None) -> ResearchState:
+    _emit(on_progress, "planner", "正在拆解研究计划…")
     plan = run_planner(question)
-    # 1) 本地 RAG：原问题
+
+    if USE_MCP:
+        _emit(on_progress, "mcp", "经 MCP 检索中（本地 + 联网 + 深读）…")
+        from deep_research.tools.mcp_bridge import search_via_mcp
+        hits = search_via_mcp(question, plan.sub_questions)
+        state = ResearchState(
+            research_id=str(uuid.uuid4()),
+            question=question,
+            plan=plan,
+        )
+        state.evidence = hits
+        state.metrics.tool_calls = 1
+        _emit(on_progress, "search_done", f"证据已收集 {len(state.evidence)} 条")
+        return state
+
+    _emit(on_progress, "rag", "正在检索本地知识库…")
     state = run_searcher(question, top_k=4)
     state.plan = plan
     seen_ids = {e.id for e in state.evidence}
@@ -35,19 +78,20 @@ def run_plan_and_search(question: str) -> ResearchState:
                 seen_sources.add(e.source)
             added += 1
         return added
-    # 2) 联网搜索：先对原问题搜一次（控成本）
+    _emit(on_progress, "web", "正在联网搜索…")
     web_added = _merge(web_search(question, max_results=5))
     if web_added:
         state.metrics.tool_calls += 1
-    # 3) 子问题：本地补检 + 联网补检
     for sq in plan.sub_questions:
         local_added = _merge(vector_search(sq, top_k=2))
         if local_added:
             state.metrics.tool_calls += 1
-        # 子问题也联网的话打开下面两行；想省额度可先注释掉
         w_added = _merge(web_search(sq, max_results=2))
         if w_added:
             state.metrics.tool_calls += 1
+    _emit(on_progress, "fetch", "正在深读高分网页…")
+    _upgrade_top_web(state)
+    _emit(on_progress, "search_done", f"证据已收集 {len(state.evidence)} 条")
     return state
 
 

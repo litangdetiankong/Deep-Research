@@ -30,10 +30,17 @@ json格式必须是:
 
 def _extract_json(text:str)->dict:
     text=text.strip()
-    if "'''" in text:
-        m=re.search(r"'''(?:json)?\s*(\{.*?\})\s*'''",text,flags=re.DOTALL)
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    if m:
+        text = m.group(1)
+    else:
+        m = re.search(r"'''(?:json)?\s*(\{.*?\})\s*'''", text, flags=re.DOTALL)
         if m:
-            text=m.group(1)
+            text = m.group(1)
+        else:
+            m = re.search(r"(\{.*\})", text, flags=re.DOTALL)
+            if m:
+                text = m.group(1)
     return json.loads(text)
 
 def run_planner(question:str)->Plan:

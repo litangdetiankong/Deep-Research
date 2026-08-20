@@ -33,10 +33,6 @@ def eval_one(item: dict, max_rounds: int = 1) -> dict:
     valid_ids = {e.id for e in state.evidence}
     unknown = [c for c in cites if c not in valid_ids]
 
-    # 只把像 evidence id 的引用算进去，减少误伤
-    id_like = [c for c in cites if "::" in c]
-    unknown_id_like = [c for c in id_like if c not in valid_ids]
-
     missing_headers = [h for h in REQUIRED_HEADERS if h not in report]
     hit_keywords = [k for k in item.get("must_have_any", []) if k in report]
 
@@ -47,9 +43,9 @@ def eval_one(item: dict, max_rounds: int = 1) -> dict:
         "latency_s": round(latency, 2),
         "evidence_count": len(state.evidence),
         "min_evidence_ok": len(state.evidence) >= int(item.get("min_evidence", 0)),
-        "citation_count": len(id_like),
-        "unknown_citation_count": len(unknown_id_like),
-        "unknown_citations": unknown_id_like,
+        "citation_count": len(cites),
+        "unknown_citation_count": len(unknown),
+        "unknown_citations": unknown,
         "missing_headers": missing_headers,
         "keyword_hits": hit_keywords,
         "keyword_ok": len(hit_keywords) > 0 if item.get("must_have_any") else True,
@@ -104,7 +100,7 @@ def main():
     results = []
     for item in questions:
         print(f"running {item.get('id')} ...")
-        results.append(eval_one(item, max_rounds=1))  # 评测可先 rounds=1 省钱
+        results.append(eval_one(item, max_rounds=1))
 
     out_json = OUT_DIR / "eval_results.json"
     out_md = OUT_DIR / "eval_report.md"

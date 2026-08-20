@@ -9,10 +9,14 @@ SRC = Path(__file__).resolve().parents[2]
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from typing import Callable
+
 from deep_research.config import MAX_CRITIC_ROUNDS
 from deep_research.schemas import ResearchState
 from deep_research.tools.rag import vector_search
 from deep_research.agents.writer import run_writer,find_citations
+
+ProgressFn = Callable[[str, str], None] | None
 
 @dataclass
 class CriticResult:
@@ -99,34 +103,43 @@ def _supplement_evidence(state:ResearchState,queries:list[str],top_k:int=2)->int
                 state.metrics.tool_calls+=1
     return added
 
-def apply_critic_loop(state:ResearchState,max_rounds:int | None=None)->ResearchState:
+def apply_critic_loop(state:ResearchState,max_rounds:int | None=None,on_progress:ProgressFn=None)->ResearchState:
     if max_rounds is None:
         max_rounds=MAX_CRITIC_ROUNDS
+
+    def emit(stage:str,message:str)->None:
+        print(f"[progress] {stage}: {message}")
+        if on_progress:
+            on_progress(stage,message)
 
     for round_idx in range(max_rounds):
         #第一轮先检查现有报告；若还没有报告，先写一次
         if not (state.report_md or "").strip():
+            emit("writer","正在撰写报告…")
             state=run_writer(state)
 
+        emit("critic",f"质量检查 round={round_idx}…")
         result=run_critic(state)
         print(f"[critic] round={round_idx},passed{result.passed},issues={result.issues}")
 
         if result.passed:
             state.metrics.retry_count=round_idx
+            emit("critic","质量检查通过")
             return state
 
-        #最后一轮仍失败:保留报告，但不再重写
-        if round_idx>=max_rounds:
+        #最后一轮失败:保留报告，但不再重写
+        if round_idx==max_rounds-1:
             state.metrics.retry_count=round_idx
-            #在报告末尾加审查说明
             note= "\n\n---\n## Critic 审查未完全通过\n" + "\n".join(f"- {x}" for x in result.issues)
             state.report_md+=note
+            emit("critic","质量检查未完全通过，已写入说明")
             return state
 
-        #补检+重写
+        emit("repair","检查未通过，正在补检并重写…")
         queries=_build_repair_queries(state,result)
         added=_supplement_evidence(state,queries,top_k=2)
         print(f"[critic] supplemented_evidence={added}")
+        emit("writer","正在重写报告…")
         state=run_writer(state)
 
     return state

@@ -1,7 +1,7 @@
 # Deep-Research Demo 问题集
 
 > 领域：技术知识研报  
-> 更新日期：2026-08-16
+> 更新日期：2026-08-20
 
 ---
 
@@ -11,7 +11,7 @@
 
 1. 启动：`uvicorn deep_research.api.main:app --app-dir src --reload --host 127.0.0.1 --port 8000`
 2. 打开 http://127.0.0.1:8000/
-3. 粘贴下列任一问题 →「开始研究」
+3. 粘贴下列任一问题 →「开始研究」（状态栏会显示当前步骤；若仍是旧页面请 Ctrl+F5）
 4. 将满意的 `outputs/reports/report_*.md` 复制到 `docs/samples/` 并改名保存
 
 ### 命令行
