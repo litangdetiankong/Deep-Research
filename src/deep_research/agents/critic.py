@@ -103,6 +103,12 @@ def _supplement_evidence(state:ResearchState,queries:list[str],top_k:int=2)->int
                 state.metrics.tool_calls+=1
     return added
 
+def repair_once(state: ResearchState, issues: list[str], top_k: int = 2) -> int:
+    """按 Critic 的 issues 补一轮本地检索。返回新增证据条数。"""
+    result = CriticResult(passed=False, issues=issues)
+    queries = _build_repair_queries(state, result)
+    return _supplement_evidence(state, queries, top_k=top_k)
+
 def apply_critic_loop(state:ResearchState,max_rounds:int | None=None,on_progress:ProgressFn=None)->ResearchState:
     if max_rounds is None:
         max_rounds=MAX_CRITIC_ROUNDS
@@ -136,8 +142,7 @@ def apply_critic_loop(state:ResearchState,max_rounds:int | None=None,on_progress
             return state
 
         emit("repair","检查未通过，正在补检并重写…")
-        queries=_build_repair_queries(state,result)
-        added=_supplement_evidence(state,queries,top_k=2)
+        added=repair_once(state,result.issues,top_k=2)
         print(f"[critic] supplemented_evidence={added}")
         emit("writer","正在重写报告…")
         state=run_writer(state)

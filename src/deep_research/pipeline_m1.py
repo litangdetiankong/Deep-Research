@@ -17,7 +17,7 @@ from deep_research.agents.writer import run_writer, save_report, find_citations
 from deep_research.agents.critic import apply_critic_loop, run_critic
 from deep_research.tools.search import web_search
 from deep_research.tools.fetch import fetch_url
-from deep_research.config import USE_MCP
+from deep_research.config import USE_MCP, USE_LANGGRAPH
 
 ProgressFn = Callable[[str, str], None] | None
 
@@ -102,14 +102,17 @@ if __name__=="__main__":
     if not q:
         print("问题不能未空")
         raise SystemExit(1)
-    # 1) 规划 + 检索
-    state = run_plan_and_search(q)
-    # 2) Critic 闭环（内部会：检查 → 不通过则补检 → 重写 Writer）
-    state = apply_critic_loop(state)
-    # 3) 落盘
+    if USE_LANGGRAPH:
+        from deep_research.graph import run_with_graph
+
+        state = run_with_graph(q)
+    else:
+        state = run_plan_and_search(q)
+        state = apply_critic_loop(state)
+
     evidence_path = save_evidence_pack(state)
     report_path = save_report(state)
-    # 4) 最终再检查一次，打印结果
+
     final = run_critic(state)
     print("research_id:", state.research_id)
     print("plan.sub_questions:")

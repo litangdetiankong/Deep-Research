@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from deep_research.history_store import append_history
 from deep_research.history_store import list_history, get_history
 from deep_research.schemas import ResearchState
+from deep_research.config import USE_LANGGRAPH
 
 import json
 import queue
@@ -54,6 +55,12 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
+def _run_research(question: str, max_rounds: int, on_progress=None) -> ResearchState:
+    if USE_LANGGRAPH:
+        from deep_research.graph import run_with_graph
+        return run_with_graph(question, max_rounds=max_rounds, on_progress=on_progress)
+    state = run_plan_and_search(question, on_progress=on_progress)
+    return apply_critic_loop(state, max_rounds=max_rounds, on_progress=on_progress)
 
 def _payload_from_state(state: ResearchState, evidence_path: Path, report_path: Path) -> dict:
     return {
@@ -76,8 +83,7 @@ def research(req: ResearchRequest):
         raise HTTPException(status_code=400, detail="question 不能为空")
 
     try:
-        state = run_plan_and_search(q)
-        state = apply_critic_loop(state, max_rounds=req.max_rounds)
+        state = _run_research(q, req.max_rounds)
 
         evidence_path = save_evidence_pack(state)
         report_path = save_report(state)
@@ -111,8 +117,7 @@ def research_stream(req: ResearchRequest):
 
     def worker() -> None:
         try:
-            state = run_plan_and_search(q, on_progress=on_progress)
-            state = apply_critic_loop(state, max_rounds=req.max_rounds, on_progress=on_progress)
+            state = _run_research(q, req.max_rounds, on_progress=on_progress)
             evidence_path = save_evidence_pack(state)
             report_path = save_report(state)
             payload = _payload_from_state(state, evidence_path, report_path)
@@ -150,6 +155,10 @@ if WEB_DIR.exists():
         if not index.exists():
             raise HTTPException(status_code=404, detail="index.html missing")
         return FileResponse(index)
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok", "use_langgraph": USE_LANGGRAPH}
 
 @app.get("/history")
 def api_list_history(limit: int = 50):

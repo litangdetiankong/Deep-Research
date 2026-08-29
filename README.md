@@ -2,7 +2,7 @@
 
 面向**技术知识研报**的多智能体深度研究系统（Deep Research Agent）。
 
-输入一个调研问题，系统自动完成：**规划 → 检索取证（本地 RAG + 联网搜索 + 高分网页深读）→ 带引用写作 → Critic 质量闸门**，并输出可追溯的 Markdown 研究报告。提供 CLI、FastAPI 网页（历史、Markdown 渲染、步骤进度），以及评测脚本与 MCP 工具封装（层次 A 自测，层次 B 可开关接入主检索）。
+输入一个调研问题，系统自动完成：**规划 → 检索取证（本地 RAG + 联网搜索 + 高分网页深读）→ 带引用写作 → Critic 质量闸门**，并输出可追溯的 Markdown 研究报告。提供 CLI、FastAPI 网页（历史、Markdown 渲染、步骤进度），评测脚本，MCP 工具封装（层次 A 自测，层次 B 可开关接入主检索），以及可选的 LangGraph 状态图编排（`USE_LANGGRAPH`）。
 
 > 垂直领域：Technical Research（Agent / RAG / MCP / 框架对比等）
 
@@ -17,6 +17,7 @@
 - **Web**：FastAPI + 左侧历史 / 右侧报告；Markdown 渲染；`POST /research/stream` 显示当前步骤
 - **Eval**：固定题集一键评测（题集 `data/eval/`，脚本 `src/deep_research/eval/runner.py`）
 - **MCP**：层次 A 为 Server/Client 自测；层次 B 可通过 `.env` 中 `USE_MCP=1` 让主检索经 MCP Client 调用
+- **LangGraph**：`.env` 中 `USE_LANGGRAPH=1` 时，CLI / API 用状态图编排 Writer–Critic–补检；默认 `0` 走脚本流水线。评测脚本不走图
 - **可落盘**：`outputs/reports/` 保存证据包 JSON 与报告 Markdown
 - **进度**：网页走 `POST /research/stream`，状态栏显示当前步骤
 
@@ -38,7 +39,7 @@ Writer ──► 带引用 Markdown 报告
    │
    ▼
 Critic ──► 通过 / 补检重写（MAX_CRITIC_ROUNDS）
-   │
+   │            （USE_LANGGRAPH=1 时由 graph.py 编排 write / critic / repair）
    ▼
 report_*.md + evidence_*.json + 历史记录
 ```
@@ -59,7 +60,7 @@ report_*.md + evidence_*.json + 历史记录
 - Python 3.10+
 - DeepSeek API（OpenAI 兼容）
 - Tavily API（推荐；无密钥时可降级为仅本地 RAG）
-- 依赖见 `requirements.txt`（另需 `openai`、`mcp` 等，按实际 import 安装）
+- 依赖见 `requirements.txt`（另需 `openai`、`mcp`、`langgraph` 等，按实际 import 安装）
 
 ---
 
@@ -92,6 +93,7 @@ SEARCH_PROVIDER=tavily
 MAX_RESEARCH_STEPS=12
 MAX_CRITIC_ROUNDS=2
 USE_MCP=0
+USE_LANGGRAPH=0
 ```
 
 **不要提交 `.env`。**
@@ -110,8 +112,9 @@ uvicorn deep_research.api.main:app --app-dir src --reload --host 127.0.0.1 --por
 
 - 页面：http://127.0.0.1:8000/（强制刷新后，状态栏会显示「规划 / 检索 / 深读 / 写作 / 检查」）
 - API 文档：http://127.0.0.1:8000/docs
-- 同步接口：`POST /research`（评测仍走这条）
+- 同步接口：`POST /research`（评测 runner 仍直接调 `pipeline_m1`，不经过本接口的图开关）
 - 进度接口：`POST /research/stream`（网页使用）
+- 健康检查：`GET /health`（网页挂载后会带 `use_langgraph`，改 `.env` 后需重启 uvicorn）
 
 ### 5) 命令行
 
@@ -184,6 +187,25 @@ python scripts\test_mcp_client.py
 
 ---
 
+## LangGraph（可选编排）
+
+业务 Agent 仍是原来的函数，图只负责节点与边，不把 `web_search` 拆成一堆小节点。
+
+- 实现：`src/deep_research/graph.py`（`run_with_graph`）
+- 公开补检入口：`critic.repair_once(state, issues)`（图的 repair 节点调用它，不直接 import 私有函数）
+- 图：`plan_and_search → write → critic`；通过则 `save`；未通过且未到轮次上限则 `repair → write`；最后一轮失败则 `fail_note → save`
+- 接入：`api/main.py` 的 `_run_research`、`pipeline_m1.py` 的 `__main__` 读 `USE_LANGGRAPH`
+- **评测不走图**：`eval/runner.py` 仍是 `run_plan_and_search` + `apply_critic_loop`，方便和旧路径对照
+
+```env
+USE_LANGGRAPH=0
+```
+
+`0`（默认）：脚本流水线，演示与评测更稳。  
+`1`：CLI / `POST /research` / `POST /research/stream` 走状态图。改完需重启 uvicorn。可用 `GET /health` 看进程是否读到开关。
+
+---
+
 ## 项目结构
 
 ```text
@@ -219,6 +241,7 @@ Deep-Research/
     ├── eval/runner.py
     ├── schemas.py
     ├── config.py
+    ├── graph.py
     ├── llm.py
     ├── history_store.py
     └── pipeline_m1.py
@@ -240,11 +263,11 @@ Deep-Research/
 - MCP 层次 B（`USE_MCP=1` 时主检索经 Client；默认 `0` 直调函数。Critic 补检仍走本地 RAG）
 - `fetch_url` 深读分数最高的 2 个网页，失败不中断主流程
 - 网页步骤进度（`/research/stream`）
+- LangGraph 状态图（`graph.py`；`USE_LANGGRAPH=1` 时 CLI / API 走图；默认 `0`。评测仍走旧流水线）
 
 ### 可继续增强
 
 - 扩大评测题集，补 token / 费用
-- LangGraph 状态图编排
 - 演示视频与 GitHub 推送
 - token / 耗时写入 `Metrics`；Critic 补检也可走 MCP
 
@@ -252,7 +275,7 @@ Deep-Research/
 
 ## 求职一句话
 
-> 独立实现 Deep Research Agent：基于结构化状态契约，完成本地 RAG + 联网检索与高分网页深读、多智能体规划写作与 Critic 自动补检；提供 FastAPI 网页（历史回看、步骤进度）、固定 Demo 与评测脚本（3 题 Critic 通过率 100%，未知 evidence_id 率 0%）；检索工具封装为 MCP Server，主链路可用 `USE_MCP` 切换是否经 Client 调用。
+> 独立实现 Deep Research Agent：基于结构化状态契约，完成本地 RAG + 联网检索与高分网页深读、多智能体规划写作与 Critic 自动补检；提供 FastAPI 网页（历史回看、步骤进度）、固定 Demo 与评测脚本（3 题 Critic 通过率 100%，未知 evidence_id 率 0%）；检索工具封装为 MCP Server（`USE_MCP`），编排可用 `USE_LANGGRAPH` 在脚本流水线与状态图之间切换。
 
 ---
 
@@ -265,4 +288,4 @@ MIT License. 详见 [`LICENSE`](./LICENSE)。
 ## 致谢
 
 - [Hello-Agents](https://github.com/datawhalechina/hello-agents)（Datawhale）
-- DeepSeek / Tavily / Chroma / FastAPI / MCP Python SDK
+- DeepSeek / Tavily / Chroma / FastAPI / LangGraph / MCP Python SDK

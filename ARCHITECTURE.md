@@ -2,8 +2,8 @@
 
 > 项目路径：`D:\Deep-Research`  
 > 垂直领域：技术知识研报（Technical Research）  
-> 文档阶段：主链路 / Web 进度 / 评测 / fetch_url / MCP 层次 A+B（开关）已落地  
-> 版本：v0.3｜2026-08-20（操作说明以 README 为准）
+> 文档阶段：主链路 / Web 进度 / 评测 / fetch_url / MCP 层次 A+B / LangGraph 开关已落地  
+> 版本：v0.4｜2026-08-29（操作说明以 README 为准）
 
 ---
 
@@ -70,10 +70,10 @@
 
 - 实际编排在 `pipeline_m1.py`：Planner → Searcher → **Writer → Critic**（失败则补检重写）。立项图把 Critic 画在 Writer 之前，代码是先写再审。
 - `fetch_url` **已实现**（`tools/fetch.py`）：对已有网页证据按 score 取 Top-2，原地加长 `snippet`；超时/非 HTML 返回空字符串，不中断研究。
-- 网页 Demo 通过 `POST /research/stream` 推送阶段（规划 / 检索 / 深读 / 写作 / 检查）；评测仍用同步 `POST /research`。
-- `graph.py`（LangGraph）、独立 traces、Librarian **尚未实现**。
+- 网页 Demo 通过 `POST /research/stream` 推送阶段（规划 / 检索 / 深读 / 写作 / 检查）；评测 runner 仍直接调 `pipeline_m1`，不经过图开关。
+- `graph.py`（LangGraph）**已实现**，默认关闭：`.env` 中 `USE_LANGGRAPH=1` 时，CLI 与 API 走 `run_with_graph`。图只编排已有函数，不拆检索工具。独立 traces、Librarian **尚未实现**。
 - Searcher 是确定性流水线工具调用，不是模型每步自选工具的完整 ReAct。
-- Critic 当前是规则闸门（章节 / 引用闭合 / 摘要引用密度），不是再调一次大模型。
+- Critic 当前是规则闸门（章节 / 引用闭合 / 摘要引用密度），不是再调一次大模型。补检对外入口是 `repair_once(state, issues)`。
 
 ### 3.2 可选扩展角色（未实现）
 
@@ -108,7 +108,7 @@
 | Critic | Reflection | 对证据与中间结论做反思与修订 |
 | Writer | 受限生成 + 模板 | 降低跑题、格式漂移和「无引用断言」 |
 
-说明：早期可用「顺序脚本编排」跑通闭环；后续再用 LangGraph（或等价状态机）显式建模节点与边，便于讲解与扩展。
+说明：默认仍用 `pipeline_m1.py` 顺序脚本跑通闭环；`USE_LANGGRAPH=1` 时用 `graph.py` 显式建模 Writer–Critic–补检的节点与条件边，业务函数不改。
 
 ---
 
@@ -209,6 +209,14 @@
 - **层次 A（已实现）：** `rag_search` / `tavily_search` / `fetch_url` 封装为 MCP Server（`src/deep_research/mcp/kb_server.py`），Client 可 stdio 自测（`scripts/test_mcp_client.py`）。
 - **层次 B（已实现，默认关闭）：** `.env` 中 `USE_MCP=1` 时，`run_plan_and_search` 经 `tools/mcp_bridge.py` 一次拉起 stdio Client，完成本地检索、联网搜索与深读。`USE_MCP=0` 时主路径仍直接 `import` Python 函数。Critic 补检始终走本地 `vector_search`。
 
+### 8.3 LangGraph 编排（已实现，默认关闭）
+
+- **落点：** `src/deep_research/graph.py`；入口 `run_with_graph`。
+- **节点：** `plan_and_search`（复用 `run_plan_and_search`）→ `write` → `critic`；条件边 `_after_critic`：通过 → `save`；未通过且未到上限 → `repair`（`repair_once`）再回 `write`；最后一轮失败 → `fail_note` → `save`。
+- **开关：** `.env` 中 `USE_LANGGRAPH=1` 时，`api/main.py` 的 `_run_research` 与 `pipeline_m1.py` 的 CLI 走图。`USE_LANGGRAPH=0` 时仍为 `run_plan_and_search` + `apply_critic_loop`。
+- **评测钉死旧路径：** `eval/runner.py` 不读该开关，避免图与脚本混在同一组指标里。
+- **进度：** 图节点通过 `config["configurable"]["on_progress"]` 回调，与 `/research/stream` 同一套事件。
+
 ---
 
 ## 9. 质量闸门（防幻觉）
@@ -230,7 +238,7 @@ D:\Deep-Research\
 ├── src/deep_research/
 │   ├── config.py            # 配置与环境变量
 │   ├── schemas.py           # 数据结构契约
-│   ├── graph.py             # 编排（未实现）
+│   ├── graph.py             # LangGraph（USE_LANGGRAPH 开关）
 │   ├── agents/              # Planner/Searcher/Critic/Writer
 │   ├── tools/               # rag.py、search.py、fetch.py、mcp_bridge.py
 │   ├── memory/              # 工作记忆（未实现）
@@ -254,7 +262,7 @@ D:\Deep-Research\
 |------|------|------|
 | 语言 | Python 3.10+ | 与主流 Agent 生态一致 |
 | 配置 | `.env` + `.env.example` | 密钥不进 Git |
-| 编排 | 顺序脚本 `pipeline_m1.py` | LangGraph / `graph.py` 未上 |
+| 编排 | 默认 `pipeline_m1.py`；可选 `graph.py` | `USE_LANGGRAPH=0/1`；评测走脚本 |
 | LLM | DeepSeek（OpenAI 兼容） | `.env` 中 `LLM_*` |
 | 向量库 | 本地 Chroma（`tech_research`） | `scripts/ingest_kb.py` |
 | 日志 | 证据包 JSON + `history.jsonl` | 独立 traces 未做 |
@@ -269,7 +277,7 @@ D:\Deep-Research\
 | M1 证据闭环 | CLI 产出证据包 JSON | **已完成** |
 | M2 报告闭环 | 带引用 Markdown 报告 | **已完成** |
 | A MVP | 可演示、可写简历 | **已完成**（网页 + samples） |
-| M3 MCP + 编排 | 协议化工具 + 状态图 | **部分完成**：层次 A + 层次 B 开关已有；LangGraph 未做 |
+| M3 MCP + 编排 | 协议化工具 + 状态图 | **已完成**：MCP 层次 A + B 开关；LangGraph 开关（默认关；评测不走图） |
 | M4 评测 | 指标与评测集 | **已完成**（3 题；2026-08-20 通过率 100%） |
 | B 完整作品 | Web + 评测 + 面试稿 | **基本完成**（含步骤进度与深读）；缺演示视频与 GitHub 推送 |
 
@@ -294,3 +302,4 @@ Demo / 评测题已固定为技术知识研报（见 `docs/demo_questions.md`、
 | 2026-08-15 | 初始化架构文档（M0） |
 | 2026-08-20 | 按实现更新里程碑、目录与工具状态；标明实际流水线为 Writer 后 Critic；评测脚本位于 `src/deep_research/eval/runner.py` |
 | 2026-08-20 | v0.3：`fetch_url` Top-2 深读；`/research/stream` 步骤进度；MCP 层次 B（`USE_MCP` 开关） |
+| 2026-08-29 | v0.4：LangGraph（`graph.py` + `repair_once`）；`USE_LANGGRAPH` 接入 CLI / API；评测仍走旧流水线 |

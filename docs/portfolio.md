@@ -3,13 +3,13 @@
 > 项目名称：Deep-Research  
 > 定位：技术知识研报方向的 Deep Research Agent  
 > 仓库路径：`D:\Deep-Research`  
-> 更新日期：2026-08-20
+> 更新日期：2026-08-29
 
 ---
 
 ## 1. 一句话介绍
 
-独立设计并实现一套多智能体深度研究系统：输入技术调研问题后，自动完成研究规划、本地知识库与联网检索、高分网页深读、带引用报告写作，并通过 Critic 质量闸门进行有限次补检重写；提供 FastAPI 网页（历史回看、步骤进度）与可开关的 MCP 主检索路径。
+独立设计并实现一套多智能体深度研究系统：输入技术调研问题后，自动完成研究规划、本地知识库与联网检索、高分网页深读、带引用报告写作，并通过 Critic 质量闸门进行有限次补检重写；提供 FastAPI 网页（历史回看、步骤进度）、可开关的 MCP 主检索路径，以及可开关的 LangGraph 状态图编排。
 
 ---
 
@@ -37,6 +37,7 @@ Deep-Research 将研究流程拆成可组合模块，用结构化状态（`Resea
 | Critic | 规则检查结构与引用；失败则补检索并重写（有轮次上限） |
 | Web | FastAPI；提问、历史回看、Markdown 渲染、步骤进度（`/research/stream`） |
 | MCP | 层次 A：Server/Client 自测；层次 B：`USE_MCP=1` 时主检索经 Client |
+| LangGraph | `USE_LANGGRAPH=1` 时 CLI / API 走状态图；默认脚本流水线。评测不走图 |
 | 产物 | `outputs/reports/report_*.md`、`evidence_*.json` |
 
 端到端链路：
@@ -64,6 +65,9 @@ Deep-Research 将研究流程拆成可组合模块，用结构化状态（`Resea
 5. **工具协议可切换**  
    同一套 `rag_search` / `tavily_search` / `fetch_url` 可直调或经 MCP Client（`USE_MCP`），演示默认直调以保证稳定。
 
+6. **编排可切换**  
+   默认顺序脚本；`USE_LANGGRAPH=1` 时用状态图显式建模 `write → critic → repair` 条件边。图只包已有函数，评测钉在旧路径上对照。
+
 ---
 
 ## 5. 我负责的工作
@@ -75,6 +79,7 @@ Deep-Research 将研究流程拆成可组合模块，用结构化状态（`Resea
 - Planner / Searcher / Writer / Critic 实现与串联
 - FastAPI 接口（含流式进度）、前端页面与历史记录
 - MCP 层次 A/B（Server、Client 自测、主链路开关）
+- LangGraph 状态图（`graph.py`、`repair_once`、`USE_LANGGRAPH` 接入 CLI / API）
 - README 与作品集文档整理
 
 ---
@@ -108,7 +113,7 @@ uvicorn deep_research.api.main:app --app-dir src --reload --host 127.0.0.1 --por
 我做的是一个技术知识方向的 Deep Research Agent。  
 用户输入调研问题后，Planner 先拆解研究计划；Searcher 结合本地知识库和联网搜索收集证据；Writer 按模板生成带引用的研究报告；Critic 检查引用和结构，不通过就补检并有限次重写。  
 和普通聊天相比，它有结构化状态、工具闭环、可落盘产物和网页演示，更能体现 Agent 工程能力。  
-固定 3 题评测 Critic 通过率 100%、未知 evidence_id 率 0%，平均约 68 秒。检索上会深读高分网页；工具层封装为 MCP，主链路可用开关决定是否经 Client 调用。后续可补演示视频和 LangGraph。
+固定 3 题评测 Critic 通过率 100%、未知 evidence_id 率 0%，平均约 68 秒。检索上会深读高分网页；工具层封装为 MCP，编排可用 LangGraph 状态图，二者都用环境变量开关，评测走脚本路径以便对照。后续可补演示视频和 GitHub 推送。
 
 ---
 
@@ -133,7 +138,7 @@ uvicorn deep_research.api.main:app --app-dir src --reload --host 127.0.0.1 --por
 **局限**
 
 - 已有 3 题自动评测；题集偏小，尚未统计 token / 费用
-- 编排仍为脚本流水线，未升级为 LangGraph 状态图
+- LangGraph 默认关闭（`USE_LANGGRAPH=0`）；评测不走图，图路径尚未纳入固定题集指标
 - MCP 层次 B 默认关闭（`USE_MCP=0`）；Critic 补检仍走本地 RAG
 - `fetch_url` 只深读 Top-2，且受站点反爬/超时影响，不保证每次都加长正文
 
@@ -141,14 +146,13 @@ uvicorn deep_research.api.main:app --app-dir src --reload --host 127.0.0.1 --por
 
 1. 录制 3～5 分钟演示视频  
 2. 扩大评测题集，补 token / 费用  
-3. 可选：LangGraph 状态图  
-4. 本机推送 GitHub  
+3. 本机推送 GitHub  
 
 ---
 
 ## 10. 简历条目（可直接改写）
 
-> 独立实现 Deep Research 多智能体系统（Python）：完成 Planner/Searcher/Writer/Critic 闭环，集成 Chroma、Tavily 与高分网页深读，基于 Pydantic 状态契约保证引用可追溯；提供 FastAPI 网页（历史回看、步骤进度），并将检索工具封装为 MCP Server，主链路可通过 `USE_MCP` 经 Client 调用。固定 3 题评测 Critic 通过率 100%，未知 evidence_id 率 0%，平均耗时约 68 秒。
+> 独立实现 Deep Research 多智能体系统（Python）：完成 Planner/Searcher/Writer/Critic 闭环，集成 Chroma、Tavily 与高分网页深读，基于 Pydantic 状态契约保证引用可追溯；提供 FastAPI 网页（历史回看、步骤进度）；检索工具封装为 MCP Server（`USE_MCP`），编排可用 LangGraph 状态图（`USE_LANGGRAPH`），评测钉在脚本路径上对照。固定 3 题评测 Critic 通过率 100%，未知 evidence_id 率 0%，平均耗时约 68 秒。
 
 ---
 
