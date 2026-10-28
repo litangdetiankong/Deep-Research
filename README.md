@@ -268,14 +268,7 @@ Deep-Research/
 ### 可继续增强
 
 - 扩大评测题集，补 token / 费用
-- 演示视频与 GitHub 推送
 - token / 耗时写入 `Metrics`；Critic 补检也可走 MCP
-
----
-
-## 求职一句话
-
-> 独立实现 Deep Research Agent：基于结构化状态契约，完成本地 RAG + 联网检索与高分网页深读、多智能体规划写作与 Critic 自动补检；提供 FastAPI 网页（历史回看、步骤进度）、固定 Demo 与评测脚本（3 题 Critic 通过率 100%，未知 evidence_id 率 0%）；检索工具封装为 MCP Server（`USE_MCP`），编排可用 `USE_LANGGRAPH` 在脚本流水线与状态图之间切换。
 
 ---
 
